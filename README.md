@@ -1,26 +1,26 @@
 # 🧾 Receipt Organizer — Full Stack Setup Guide
 
-> **Stack:** Telegram → n8n → Gemini Vision → Firebase → React Dashboard (Vercel)  
-> **Cost:** $0 (all free tiers, nothing pauses or expires)
+> **Stack:** Telegram → n8n → Gemini Vision → Cloudinary (images) + Firestore (metadata) → React Dashboard (Vercel)  
+> **Cost:** $0 (all free tiers, nothing pauses or expires, no credit card needed)
 
 ---
 
 ## Project Overview
 
-This project captures receipt photos via Telegram, extracts data using Google Gemini Vision AI, stores images in Firebase Storage and metadata in Firestore, and displays everything in a React dashboard deployed on Vercel.
+This project captures receipt photos via Telegram, extracts data using Google Gemini Vision AI, stores images in Cloudinary and metadata in Firestore, and displays everything in a React dashboard deployed on Vercel.
 
 ### Architecture
 
 ```
 [You] → Telegram (send photo/PDF)
            ↓
-        n8n (orchestration)
+        n8n on Render (orchestration)
            ↓
     Gemini Vision API (extract: vendor, date, amount, category)
            ↓
     ┌──────────────────────────┐
-    │  Firebase Storage        │  ← receipt image file
-    │  Firestore (DB)          │  ← metadata row
+    │  Cloudinary              │  ← receipt image file (free, no card)
+    │  Firestore (DB)          │  ← metadata + Cloudinary image URL
     └──────────────────────────┘
            ↓
     React Dashboard (Vercel)   ← view, filter, search receipts
@@ -33,24 +33,26 @@ This project captures receipt photos via Telegram, extracts data using Google Ge
 | Tool | Why |
 |------|-----|
 | **Telegram** | Free bot API, no approval needed, instant setup, supports image/PDF upload natively |
-| **Gemini** | Free via AI Studio, has vision (image reading) capability — Groq does not |
-| **Firebase** | Free Spark plan, never pauses (Supabase pauses after 7 days inactivity) |
-| **n8n (self-hosted)** | Free, open source, has native Gemini + Telegram nodes |
+| **Gemini** | Free via AI Studio, has vision (image reading) capability — Groq does not support images |
+| **Cloudinary** | Free 25GB image storage, no credit card, never pauses — Firebase Storage requires paid plan |
+| **Firestore** | Free Spark plan, never pauses, stores receipt metadata + Cloudinary URLs |
+| **n8n on Render** | Free, open source, deployed on Render for permanent HTTPS URL (required by Telegram) |
 | **Vercel** | Free frontend hosting, perfect for React dashboards |
 
 ---
 
 ## Prerequisites
 
-- [ ] Self-hosted n8n instance (Railway, Render, or local)
+- [ ] n8n deployed on Render (free)
 - [ ] Google account (for Gemini API + Firebase)
 - [ ] Telegram account
+- [ ] Cloudinary account (free, no card needed)
 - [ ] Node.js + npm (for local dashboard development)
 - [ ] Vercel account (free)
 
 ---
 
-## Part 1 — Firebase Setup
+## Part 1 — Firebase Setup (Firestore only — no Storage needed)
 
 ### 1.1 Create Firebase Project
 
@@ -61,7 +63,7 @@ This project captures receipt photos via Telegram, extracts data using Google Ge
 ### 1.2 Enable Firestore
 
 1. In Firebase Console → **Firestore Database** → Create Database
-2. Choose **Start in test mode** (you'll secure it later)
+2. Choose **Start in test mode**
 3. Select a region close to you (e.g., `asia-south1` for India)
 
 Firestore will store each receipt as a document with these fields:
@@ -74,17 +76,14 @@ receipts (collection)
         ├── amount: 450
         ├── currency: "INR"
         ├── category: "Eating Out"
-        ├── imageUrl: "https://firebasestorage..."
+        ├── imageUrl: "https://res.cloudinary.com/..."
         ├── fileName: "2025-06-15_Swiggy_450_INR.jpg"
-        └── createdAt: timestamp
+        └── createdAt: "2025-06-15T10:30:00.000Z"
 ```
 
-### 1.3 Enable Firebase Storage
+> ⚠️ Do NOT enable Firebase Storage — it requires a paid plan. Images are handled by Cloudinary instead.
 
-1. In Firebase Console → **Storage** → Get Started
-2. Start in test mode → Choose same region as Firestore
-
-### 1.4 Get Firebase Config (for Dashboard)
+### 1.3 Get Firebase Config (for Dashboard)
 
 1. Firebase Console → Project Settings (gear icon) → **General**
 2. Scroll to **Your apps** → Add app → Web (`</>`)
@@ -92,7 +91,6 @@ receipts (collection)
 4. Copy the `firebaseConfig` object — you'll need this for the React dashboard
 
 ```javascript
-// Save this, you'll paste it into the dashboard later
 const firebaseConfig = {
   apiKey: "YOUR_API_KEY",
   authDomain: "receipt-organizer.firebaseapp.com",
@@ -103,18 +101,24 @@ const firebaseConfig = {
 };
 ```
 
-### 1.5 Get Firebase Admin SDK (for n8n)
+### 1.4 Remove Firebase Admin SDK requirement
 
-n8n will write to Firebase using the REST API, authenticated with a service account.
+You do NOT need the Admin SDK or service account. n8n writes to Firestore via the REST API using your Web API key directly while rules are in test mode.
 
-1. Firebase Console → Project Settings → **Service Accounts**
-2. Click **Generate new private key** → Download JSON
-3. Open the JSON and note these values:
-   - `project_id`
-   - `client_email`
-   - `private_key`
+---
 
-> ⚠️ Keep this file secure. Never commit it to GitHub.
+## Part 1B — Cloudinary Setup (Image Storage)
+
+> Cloudinary replaces Firebase Storage. Free tier gives 25GB, no credit card, never pauses.
+
+1. Go to [cloudinary.com](https://cloudinary.com) → **Sign Up Free**
+2. No credit card needed
+3. After signup, go to your **Dashboard** and note these 3 values:
+   - `Cloud name` (e.g., `dxyz123abc`)
+   - `API Key` (e.g., `874321098765432`)
+   - `API Secret` (e.g., `aBcDeFgHiJkLmNoPqRsTuVwXyZ`)
+
+> ⚠️ Keep API Secret secure. Never commit it to GitHub.
 
 ---
 
@@ -160,59 +164,59 @@ n8n will write to Firebase using the REST API, authenticated with a service acco
 3. Paste your Gemini API Key → Save
 4. Do the same for **Analyze a file** node
 
-### 4.4 Replace Google Drive with Firebase
+### 4.4 Replace Google Drive nodes with Cloudinary + Firestore
 
-The original workflow saves to Google Drive. Replace the **Backup to Drive** node with two **HTTP Request** nodes:
+Delete **Backup to Drive** and **Save to Sheets** nodes. Add these two HTTP Request nodes:
 
 ---
 
-#### Node A — Upload Image to Firebase Storage
+#### Node A — Upload Image to Cloudinary
 
-Replace **Backup to Drive** with an HTTP Request node:
-
-- **Name:** `Upload to Firebase Storage`
+- **Name:** `Upload to Cloudinary`
 - **Method:** `POST`
 - **URL:**
   ```
-  https://firebasestorage.googleapis.com/v0/b/YOUR_PROJECT_ID.appspot.com/o?uploadType=media&name=receipts%2F{{ $('Format Data').first().json.newFileName }}
+  https://api.cloudinary.com/v1_1/YOUR_CLOUD_NAME/auto/upload
   ```
-- **Authentication:** None (using query param token) — OR use Bearer token from service account (see note below)
-- **Body:** Binary data — select the binary key from `Get File`
-- **Headers:**
-  - `Content-Type`: `{{ $('Get File').first().binary.data.mimeType }}`
+- **Authentication:** Basic Auth
+  - Username: `YOUR_CLOUDINARY_API_KEY`
+  - Password: `YOUR_CLOUDINARY_API_SECRET`
+- **Body Content Type:** `Form Data (Multipart)`
+- **Fields:**
+  - Name: `file` → Type: Binary → Value: `data`
+  - Name: `public_id` → Type: String → Value: `={{ 'receipts/' + $('Format Data').first().json.newFileName }}`
 
-> **Firebase Auth for n8n:** The simplest approach for a personal tool is to temporarily set Firebase Storage rules to allow writes, then lock them down after setup. Alternatively, generate a Firebase auth token using a small helper Cloud Function or use the Firebase REST API with an API key appended: `&key=YOUR_WEB_API_KEY`.
+The node returns `secure_url` — the direct image link saved into Firestore next.
 
 ---
 
 #### Node B — Save Metadata to Firestore
 
-Add another HTTP Request node after the Storage upload:
-
 - **Name:** `Save to Firestore`
 - **Method:** `POST`
 - **URL:**
   ```
-  https://firestore.googleapis.com/v1/projects/YOUR_PROJECT_ID/databases/(default)/documents/receipts
+  https://firestore.googleapis.com/v1/projects/YOUR_PROJECT_ID/databases/(default)/documents/receipts?key=YOUR_FIREBASE_WEB_API_KEY
   ```
-- **Authentication:** None (test mode) or OAuth2
 - **Body Type:** JSON
 - **Body:**
 
 ```json
 {
   "fields": {
-    "vendor": { "stringValue": "={{ $('Format Data').first().json.vendor }}" },
-    "date": { "stringValue": "={{ $('Format Data').first().json.date }}" },
-    "amount": { "doubleValue": "={{ $('Format Data').first().json.amount }}" },
-    "currency": { "stringValue": "={{ $('Format Data').first().json.currency }}" },
-    "category": { "stringValue": "={{ $('Format Data').first().json.category }}" },
-    "fileName": { "stringValue": "={{ $('Format Data').first().json.newFileName }}" },
-    "imageUrl": { "stringValue": "={{ $json.downloadTokens ? 'https://firebasestorage.googleapis.com/v0/b/YOUR_PROJECT_ID.appspot.com/o/receipts%2F' + $('Format Data').first().json.newFileName + '?alt=media' : '' }}" },
-    "createdAt": { "timestampValue": "={{ new Date().toISOString() }}" }
+    "vendor":    { "stringValue": "={{ $('Format Data').first().json.vendor }}" },
+    "date":      { "stringValue": "={{ $('Format Data').first().json.date }}" },
+    "amount":    { "doubleValue": {{ $('Format Data').first().json.amount }} },
+    "currency":  { "stringValue": "={{ $('Format Data').first().json.currency }}" },
+    "category":  { "stringValue": "={{ $('Format Data').first().json.category }}" },
+    "fileName":  { "stringValue": "={{ $('Format Data').first().json.newFileName }}" },
+    "imageUrl":  { "stringValue": "={{ $json.secure_url }}" },
+    "createdAt": { "stringValue": "={{ new Date().toISOString() }}" }
   }
 }
 ```
+
+> Note: `$json.secure_url` picks up the Cloudinary image URL from the previous node output.
 
 ### 4.5 Update the Format Data Node
 
@@ -242,7 +246,7 @@ Telegram Trigger
         → Analyze an image (Gemini)   ← if image
         → Analyze a file (Gemini)     ← if PDF
     → Format Data (Code node)
-    → Upload to Firebase Storage
+    → Upload to Cloudinary
     → Save to Firestore
     → Send Confirmation (Telegram)
 ```
@@ -267,21 +271,20 @@ Create `src/firebase.js`:
 ```javascript
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
-  // Paste your config from Part 1.4 here
-  apiKey: "YOUR_API_KEY",
-  authDomain: "receipt-organizer.firebaseapp.com",
-  projectId: "receipt-organizer",
-  storageBucket: "receipt-organizer.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  // Paste your config from Part 1.3 here
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
-export const storage = getStorage(app);
+// No Firebase Storage needed — images stored in Cloudinary
 ```
 
 ### 5.3 Dashboard Features to Build
@@ -440,7 +443,7 @@ apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
 
 ## Part 7 — Firebase Security Rules (Before Going Live)
 
-Once you've confirmed everything works in test mode, lock down Firebase:
+Once confirmed working, lock down Firestore:
 
 **Firestore rules** (Firebase Console → Firestore → Rules):
 
@@ -455,20 +458,7 @@ service cloud.firestore {
 }
 ```
 
-**Storage rules:**
-
-```
-rules_version = '2';
-service firebase.storage {
-  match /b/{bucket}/o {
-    match /receipts/{fileName} {
-      allow read, write: if request.auth != null;
-    }
-  }
-}
-```
-
-> For a personal tool, you can keep test mode rules initially. Add Firebase Authentication to the dashboard later if needed.
+> No Storage rules needed — Cloudinary handles its own access control.
 
 ---
 
@@ -504,10 +494,12 @@ receipt-dashboard/
 | Issue | Fix |
 |-------|-----|
 | n8n Gemini node errors | Check API key is correct in credentials |
-| Firebase Storage upload fails | Confirm rules are in test mode, check MIME type header |
-| Firestore document not appearing | Check n8n HTTP Request body format — Firestore REST API requires the typed field format `{ "stringValue": "..." }` |
-| Dashboard shows no data | Check `firebase.js` config values match your project |
-| Telegram bot not responding | Ensure n8n workflow is set to Active |
+| Cloudinary upload fails | Check Cloud name, API Key, API Secret are correct. Confirm body is Multipart Form Data |
+| Firestore document not appearing | Check amount field has no quotes around expression. Check `doubleValue` not `stringValue` for amount |
+| imageUrl empty in Firestore | Confirm `$json.secure_url` is referenced — this comes from Cloudinary response |
+| Dashboard shows no data | Check `firebase.js` env vars match your project |
+| Telegram bot not responding | Ensure n8n workflow is published and Render service is running |
+| Render spins down (30s delay) | Expected on free tier — first message after inactivity takes ~30s to respond |
 
 ---
 
@@ -521,4 +513,4 @@ receipt-dashboard/
 
 ---
 
-*Built with Telegram · Google Gemini · n8n · Firebase · React · Vercel*
+*Built with Telegram · Google Gemini · n8n (Render) · Cloudinary · Firestore · React · Vercel*
