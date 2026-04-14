@@ -59,8 +59,20 @@ export default function App() {
       )}
       <header className="dashboard-header">
         <div className="header-icon">🧾</div>
-        <h1>Receipt Dashboard</h1>
-        <p className="subtitle">AI-powered expense tracking and organization</p>
+        <div className="header-content">
+          <div>
+            <h1>Receipt Dashboard</h1>
+            <p className="subtitle">AI-powered expense tracking and organization</p>
+          </div>
+          <a
+            className="bot-link"
+            href="https://t.me/Receiptorgbot"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            💬 Test bot on Telegram
+          </a>
+        </div>
       </header>
       
       {/* Summary */}
