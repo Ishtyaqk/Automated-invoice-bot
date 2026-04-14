@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
-import { db } from './firebase';
+import { db, firebaseConfigError } from './firebase';
 import './App.css';
 
 const CATEGORIES = ['All', 'Eating Out', 'Groceries', 'Utilities', 'Transport', 
@@ -11,8 +11,13 @@ export default function App() {
   const [filtered, setFiltered] = useState([]);
   const [category, setCategory] = useState('All');
   const [search, setSearch] = useState('');
+  const [error, setError] = useState(firebaseConfigError || '');
 
   useEffect(() => {
+    if (firebaseConfigError) {
+      return;
+    }
+
     const fetchReceipts = async () => {
       try {
         const q = query(collection(db, 'receipts'), orderBy('date', 'desc'));
@@ -21,9 +26,11 @@ export default function App() {
         setReceipts(data);
         setFiltered(data);
       } catch(err) {
-        console.error("Firebase init not complete or credentials missing", err);
+        console.error('Firebase fetch failed', err);
+        setError('Unable to load receipt data. Please check Firebase configuration.');
       }
     };
+
     fetchReceipts();
   }, []);
 
@@ -45,6 +52,11 @@ export default function App() {
 
   return (
     <div className="dashboard-container">
+      {error && (
+        <div className="error-banner">
+          <strong>Error:</strong> {error}
+        </div>
+      )}
       <header className="dashboard-header">
         <div className="header-icon">🧾</div>
         <h1>Receipt Dashboard</h1>

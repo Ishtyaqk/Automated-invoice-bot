@@ -9,6 +9,14 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+const missingKeys = Object.entries(firebaseConfig)
+  .filter(([, value]) => !value)
+  .map(([key]) => key);
+
+export const firebaseConfigError = missingKeys.length
+  ? `Missing Firebase config: ${missingKeys.join(', ')}`
+  : null;
+
+const app = missingKeys.length ? null : initializeApp(firebaseConfig);
+export const db = app ? getFirestore(app) : null;
 // Images are stored in Cloudinary; Firebase is used only for Firestore metadata.
